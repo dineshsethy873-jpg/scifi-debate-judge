@@ -268,6 +268,52 @@
     to { opacity: 1; transform: translateX(0); }
   }
 
+  /* ===== Multi-judge results ===== */
+  .vote-pills {
+    display: flex; justify-content: center; gap: 12px;
+    flex-wrap: wrap; margin-bottom: 24px;
+  }
+  .vote-pill {
+    padding: 10px 18px; border-radius: 24px;
+    font-size: 0.85rem; font-weight: 700;
+    border: 2px solid var(--border);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .vote-pill.win { border-color: var(--green); background: rgba(74,222,128,0.1); }
+  .vote-pill.lose { border-color: #ef4444; background: rgba(239,68,68,0.08); opacity: 0.7; }
+  .vote-pill .judge-name { color: var(--dim); }
+  .judge-summary-cards {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 1100px) { .judge-summary-cards { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 700px) { .judge-summary-cards { grid-template-columns: 1fr 1fr; } }
+  .judge-summary {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; text-align: center;
+  }
+  .judge-summary .js-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .judge-summary .js-name { font-size: 0.82rem; font-weight: 700; margin-bottom: 6px; }
+  .judge-summary .js-verdict { font-size: 0.85rem; font-weight: 700; margin-bottom: 4px; }
+  .judge-summary .js-score { font-size: 0.78rem; color: var(--dim); }
+  .judge-summary.win { border-color: var(--green); }
+  .judge-summary.lose { border-color: #ef4444; opacity: 0.6; }
+
+  .collapsible {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+  }
+  .collapsible-header {
+    padding: 14px 18px; cursor: pointer; display: flex;
+    justify-content: space-between; align-items: center;
+    font-weight: 700; font-size: 0.9rem;
+  }
+  .collapsible-header:hover { background: rgba(255,255,255,0.03); }
+  .collapsible-body { display: none; padding: 0 18px 18px; }
+  .collapsible.open .collapsible-body { display: block; }
+  .collapsible.open .collapse-arrow { transform: rotate(180deg); }
+  .collapse-arrow { transition: transform 0.2s; color: var(--dim); }
+
   /* ===== Responsive ===== */
   @media (max-width: 600px) {
     .app { padding: 12px; }
@@ -371,6 +417,17 @@
           </select>
         </div>
       </div>
+      <div class="form-row single">
+        <div class="form-group" style="flex-direction:row;align-items:center;gap:12px">
+          <input type="checkbox" id="multiJudge" style="width:18px;height:18px;cursor:pointer" onchange="toggleMultiJudge()">
+          <label for="multiJudge" style="cursor:pointer;color:var(--text);font-size:0.95rem;text-transform:none;letter-spacing:0">
+            🧑‍⚖️ 多名评委同时评分 — 5位评委各自独立打分，最终胜负由多数票决定
+          </label>
+        </div>
+        <p id="multiJudgeHint" style="color:var(--dim);font-size:0.82rem;margin-left:30px;display:none">
+          开启后将同时启用 默认评委、Marvin、智子、丹尼尔、TARS 五位评委，评分耗时约需 15-30 秒。
+        </p>
+      </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="saveConfig()">保存配置 & 下一步 →</button>
       </div>
@@ -450,6 +507,7 @@ function getConfig() {
     apiKey: document.getElementById('apiKey').value.trim(),
     model: document.getElementById('modelName').value.trim() || DEFAULT_MODEL,
     persona: document.getElementById('persona').value,
+    multiJudge: document.getElementById('multiJudge').checked,
   };
 }
 
@@ -459,6 +517,8 @@ function restoreConfig() {
   if (c.apiKey) document.getElementById('apiKey').value = c.apiKey;
   if (c.model) document.getElementById('modelName').value = c.model;
   if (c.persona !== undefined) document.getElementById('persona').value = c.persona;
+  if (c.multiJudge) document.getElementById('multiJudge').checked = c.multiJudge;
+  toggleMultiJudge();
   // Also restore debate info
   if (c.topic) document.getElementById('topic').value = c.topic;
   if (c.teamA) document.getElementById('teamAName').value = c.teamA;
@@ -484,6 +544,16 @@ function saveConfig() {
 }
 
 restoreConfig();
+
+// ===== Multi-judge toggle =====
+function toggleMultiJudge() {
+  const checked = document.getElementById('multiJudge').checked;
+  const personaSelect = document.getElementById('persona');
+  const hint = document.getElementById('multiJudgeHint');
+  personaSelect.disabled = checked;
+  personaSelect.style.opacity = checked ? '0.4' : '1';
+  hint.style.display = checked ? 'block' : 'none';
+}
 
 // ===== Navigation =====
 function goToSection(id) {
@@ -678,10 +748,36 @@ async function startJudging() {
   showLoading();
 
   try {
-    const result = await callLLM(config, transcript);
-    hideLoading();
-    renderResults(config, result);
-    localStorage.setItem('lastResult', JSON.stringify({ config, result }));
+    if (config.multiJudge) {
+      // === Multi-judge mode: all 5 personas in parallel ===
+      const personaKeys = ['default', 'marvin', 'sophon', 'daneel', 'tars'];
+      const loadingEl = document.getElementById('loadingText');
+
+      const promises = personaKeys.map(async (key, idx) => {
+        const cfg = { ...config, persona: key };
+        loadingEl.textContent = `正在评分中...（评委 ${idx + 1}/5 — ${PERSONAS[key].name}）`;
+        const result = await callLLM(cfg, transcript);
+        return { key, persona: PERSONAS[key], result };
+      });
+
+      const allResults = await Promise.all(promises);
+
+      // Majority vote
+      const votes = { '正方': 0, '反方': 0, '平局': 0 };
+      allResults.forEach(r => { votes[r.result.winner]++; });
+      const winner = votes['正方'] >= votes['反方'] && votes['正方'] >= votes['平局'] ? '正方'
+        : votes['反方'] >= votes['正方'] && votes['反方'] >= votes['平局'] ? '反方' : '平局';
+
+      hideLoading();
+      renderMultiResults(config, allResults, winner, votes);
+      localStorage.setItem('lastResult', JSON.stringify({ config, allResults: allResults.map(r => ({ key: r.key, result: r.result })), multiJudge: true }));
+    } else {
+      // === Single judge mode ===
+      const result = await callLLM(config, transcript);
+      hideLoading();
+      renderResults(config, result);
+      localStorage.setItem('lastResult', JSON.stringify({ config, result }));
+    }
   } catch (err) {
     hideLoading();
     document.getElementById('resultsContent').innerHTML = `
@@ -893,6 +989,172 @@ function renderResults(config, result) {
             grid: { display: false },
           },
         },
+      },
+    });
+  }, 200);
+}
+
+// ===== Render Multi-Judge Results =====
+function renderMultiResults(config, allResults, winner, votes) {
+  const dims = ['论点逻辑性', '论据丰富度', '反驳精准度', '科幻素养', '表达清晰度'];
+  const dimLabels = ['逻辑性', '丰富度', '反驳力', '科幻素养', '清晰度'];
+  const personaKeys = ['default', 'marvin', 'sophon', 'daneel', 'tars'];
+
+  // Compute average scores across all judges
+  const avg = {
+    team_scores: {
+      正方: { total: 0, dimensions: {} },
+      反方: { total: 0, dimensions: {} },
+    },
+    players: [],
+  };
+  dims.forEach(d => {
+    avg.team_scores.正方.dimensions[d] = 0;
+    avg.team_scores.反方.dimensions[d] = 0;
+  });
+  allResults.forEach(r => {
+    avg.team_scores.正方.total += r.result.team_scores.正方.total;
+    avg.team_scores.反方.total += r.result.team_scores.反方.total;
+    dims.forEach(d => {
+      avg.team_scores.正方.dimensions[d] += r.result.team_scores.正方.dimensions[d];
+      avg.team_scores.反方.dimensions[d] += r.result.team_scores.反方.dimensions[d];
+    });
+  });
+  const n = allResults.length;
+  avg.team_scores.正方.total = +(avg.team_scores.正方.total / n).toFixed(1);
+  avg.team_scores.反方.total = +(avg.team_scores.反方.total / n).toFixed(1);
+  dims.forEach(d => {
+    avg.team_scores.正方.dimensions[d] = +(avg.team_scores.正方.dimensions[d] / n).toFixed(1);
+    avg.team_scores.反方.dimensions[d] = +(avg.team_scores.反方.dimensions[d] / n).toFixed(1);
+  });
+
+  const winnerClass = winner === '正方' ? 'win-a' : winner === '反方' ? 'win-b' : 'tie';
+  const winnerIcon = winner === '平局' ? '🤝' : '🏆';
+  const winnerText = winner === '平局'
+    ? '势均力敌 · 平局！'
+    : `${winner} — ${winner === '正方' ? config.teamA : config.teamB} 获胜！`;
+
+  // Vote pill icons
+  const personaIcons = { default: '⚖️', marvin: '😤', sophon: '🔮', daneel: '🤖', tars: '📦' };
+
+  let html = `
+    <div class="verdict-banner ${winnerClass}">
+      <div class="verdict-icon">${winnerIcon}</div>
+      <div class="verdict-text">${winnerText}</div>
+      <div class="verdict-score">
+        评委投票 <b>${votes['正方']}:${votes['反方']}${votes['平局'] > 0 ? ':' + votes['平局'] : ''}</b> &nbsp;|&nbsp;
+        平均分 — ${config.teamA}: ${avg.team_scores.正方.total} 分 &nbsp;|&nbsp; ${config.teamB}: ${avg.team_scores.反方.total} 分
+      </div>
+    </div>
+
+    <div class="vote-pills">
+      ${allResults.map(r => {
+        const won = r.result.winner === winner;
+        const cls = won ? 'win' : 'lose';
+        const icon = won ? '✓' : '✗';
+        return `<div class="vote-pill ${cls}">
+          <span>${personaIcons[r.key] || '👤'}</span>
+          <span class="judge-name">${r.persona.name}</span>
+          <span>${icon} ${r.result.winner}</span>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <h3>📊 两队综合对比（五位评委平均分）</h3>
+        <canvas id="compareMultiChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>🗳️ 评委投票分布</h3>
+        <canvas id="voteChart"></canvas>
+      </div>
+    </div>
+
+    <div class="judge-summary-cards">
+      ${allResults.map(r => {
+        const won = r.result.winner === winner;
+        return `<div class="judge-summary ${won ? 'win' : 'lose'}">
+          <div class="js-icon">${personaIcons[r.key] || '👤'}</div>
+          <div class="js-name">${r.persona.name}</div>
+          <div class="js-verdict" style="color:${won ? 'var(--green)' : '#ef4444'}">${won ? '✓' : '✗'} ${r.result.winner}胜</div>
+          <div class="js-score">${config.teamA} ${r.result.team_scores.正方.total} - ${r.result.team_scores.反方.total} ${config.teamB}</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <h2 style="margin-bottom:16px;font-size:1.1rem">📋 各评委详细评分（点击展开）</h2>
+    ${allResults.map((r, ri) => `
+      <div class="collapsible" id="collapser_${ri}">
+        <div class="collapsible-header" onclick="document.getElementById('collapser_${ri}').classList.toggle('open')">
+          <span>${personaIcons[r.key] || '👤'} ${r.persona.name} — ${r.result.winner}胜 (${config.teamA} ${r.result.team_scores.正方.total} : ${r.result.team_scores.反方.total} ${config.teamB})</span>
+          <span class="collapse-arrow">▼</span>
+        </div>
+        <div class="collapsible-body">
+          <p style="color:var(--dim);margin-bottom:14px;font-style:italic;line-height:1.7">${escapeHtml(r.result.judge_comment)}</p>
+          <div class="score-cards" style="margin-bottom:0">
+            ${r.result.players.map(p => {
+              const tc = p.team === '正方' ? 'team-a-card' : 'team-b-card';
+              const bc = p.team === '正方' ? 'a' : 'b';
+              return `<div class="score-card ${tc}">
+                <div class="card-header">
+                  <div><div class="card-name">${escapeHtml(p.name)}</div></div>
+                  <div class="card-total">${p.total.toFixed(1)}</div>
+                </div>
+                <div class="card-dims">
+                  ${dims.map(d => `
+                    <div class="dim-row">
+                      <span class="dim-label">${d.slice(0,3)}</span>
+                      <div class="dim-bar-wrap"><div class="dim-bar ${bc}" style="width:${(p.dimensions[d]||0)*10}%"></div></div>
+                      <span class="dim-score">${(p.dimensions[d]||0).toFixed(1)}</span>
+                    </div>`).join('')}
+                </div>
+                <div class="card-comment">"${escapeHtml(p.comment || '')}"</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `).join('')}
+  `;
+
+  document.getElementById('resultsContent').innerHTML = html;
+
+  // Draw charts
+  setTimeout(() => {
+    const chartDefaults = {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { labels: { color: '#8888aa' } } },
+      scales: { r: { beginAtZero: true, max: 10, min: 0,
+        ticks: { stepSize: 2, color: '#8888aa', backdropColor: 'transparent' },
+        grid: { color: '#2a2a4a' },
+        pointLabels: { color: '#e0e0e0', font: { size: 12 } },
+      }},
+    };
+
+    // Comparison radar (average)
+    new Chart(document.getElementById('compareMultiChart'), {
+      type: 'radar',
+      data: {
+        labels: dimLabels,
+        datasets: [
+          { label: config.teamA, data: dims.map(d => avg.team_scores.正方.dimensions[d]), borderColor: 'rgba(0,212,255,1)', backgroundColor: 'rgba(0,212,255,0.15)', borderWidth: 3, pointRadius: 5, pointBackgroundColor: 'rgba(0,212,255,1)' },
+          { label: config.teamB, data: dims.map(d => avg.team_scores.反方.dimensions[d]), borderColor: 'rgba(255,107,107,1)', backgroundColor: 'rgba(255,107,107,0.15)', borderWidth: 3, pointRadius: 5, pointBackgroundColor: 'rgba(255,107,107,1)' },
+        ],
+      },
+      options: chartDefaults,
+    });
+
+    // Vote distribution pie
+    new Chart(document.getElementById('voteChart'), {
+      type: 'doughnut',
+      data: {
+        labels: [config.teamA, config.teamB, '平局'],
+        datasets: [{ data: [votes['正方'] || 0, votes['反方'] || 0, votes['平局'] || 0], backgroundColor: ['rgba(0,212,255,0.7)', 'rgba(255,107,107,0.7)', 'rgba(255,215,0,0.7)'], borderColor: ['rgba(0,212,255,1)', 'rgba(255,107,107,1)', 'rgba(255,215,0,1)'], borderWidth: 2 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { labels: { color: '#e0e0e0', font: { size: 14 } } } },
       },
     });
   }, 200);
