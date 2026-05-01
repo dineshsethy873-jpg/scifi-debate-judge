@@ -733,7 +733,7 @@ ${playerSkeleton}
 }
 
 // ===== Stable scoring: run N times, majority winner + median scores =====
-const STABILITY_RUNS = 3;
+const STABILITY_RUNS = 5;
 
 function majorityVote(results) {
   const votes = {};
@@ -859,6 +859,17 @@ function renderResults(config, result) {
   const aPlayers = result.players.filter(p => p.team === '正方');
   const bPlayers = result.players.filter(p => p.team === '反方');
 
+  // Agreement indicator
+  let agreementHtml = '';
+  if (result._agreement && result._agreement.length > 1) {
+    const uniqueWinners = new Set(result._agreement);
+    const allSame = uniqueWinners.size === 1;
+    agreementHtml = `<div style="text-align:center;margin-bottom:8px;font-size:0.8rem;color:${allSame ? 'var(--green)' : '#f59e0b'}">
+      ${allSame ? '✅' : '⚠️'} ${STABILITY_RUNS}轮内部验证：${result._agreement.map(w => w === '正方' ? '正' : w === '反方' ? '反' : '平').join(' ')}
+      ${!allSame ? '（取多数票）' : '（全票一致）'}
+    </div>`;
+  }
+
   const html = `
     <div class="verdict-banner ${winnerClass}">
       <div class="verdict-icon">${winnerIcon}</div>
@@ -868,6 +879,7 @@ function renderResults(config, result) {
         反方 ${config.teamB}: ${result.team_scores.反方.total.toFixed(1)} 分
       </div>
     </div>
+    ${agreementHtml}
 
     <p style="color:var(--dim);margin-bottom:16px;font-style:italic;line-height:1.7;font-size:0.95rem">${escapeHtml(result.judge_comment)}</p>
 
