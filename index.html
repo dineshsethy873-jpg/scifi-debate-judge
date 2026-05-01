@@ -710,14 +710,12 @@ ${playerSkeleton}
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${config.apiKey}`,
     },
-    body: JSON.stringify({
+    body: JSON.stringify(Object.assign({
       model: config.model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-      top_p: 1,
       seed: 42,
       max_tokens: 4096,
-    }),
+    }, config.model.includes('reasoner') ? {} : { temperature: 0, top_p: 1 })),
   });
 
   if (!resp.ok) {
