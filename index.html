@@ -572,7 +572,7 @@ const SCORING_RUBRIC = `## 五维度评分标准（每个维度1-10分）
 1-3分: 严重偏离辩题或逻辑混乱
 
 ## 评分步骤（逐步执行，不可跳过）
-步骤1 — 从文字稿中识别每位辩手的发言内容，归入对应队伍
+步骤1 — 仔细阅读文字稿中每位辩手的发言内容
 步骤2 — 对每位辩手在五个维度上分别给出1-10分（可保留1位小数），依据打分锚定参考
 步骤3 — 计算各队总分（三位辩手总分相加），各维度取队内平均
 步骤4 — 判定胜负：比较两队总分，高者获胜；总分差<0.3则判平局
@@ -586,7 +586,16 @@ async function callLLM(config, transcript) {
   const persona = PERSONAS[config.persona] || PERSONAS.default;
 
   // Entire prompt in a single user message — no system prompt
-  // (avoids DeepSeek system/user handling differences that cause nondeterminism)
+  // Pre-fills JSON skeleton with player names to eliminate identification variance
+  const allPlayers = [
+    ...config.playersA.map((n, i) => ({ name: n, team: '正方', role: `${i+1}辩` })),
+    ...config.playersB.map((n, i) => ({ name: n, team: '反方', role: `${i+1}辩` })),
+  ];
+
+  const playerSkeleton = allPlayers.map(p =>
+    `    {"name":"${p.name}","team":"${p.team}","total":0,"dimensions":{"论点逻辑性":0,"论据丰富度":0,"反驳精准度":0,"科幻素养":0,"表达清晰度":0},"comment":""}`
+  ).join(',\n');
+
   const prompt = `${persona.identity}
 
 ---
@@ -598,11 +607,31 @@ ${SCORING_RUBRIC}
 正方队伍「${config.teamA}」：${config.playersA.join('、')}
 反方队伍「${config.teamB}」：${config.playersB.join('、')}
 
+=== 待评分的辩手（已确定，按此顺序输出） ===
+${allPlayers.map((p, i) => `${i+1}. ${p.team} ${p.role} — ${p.name}`).join('\n')}
+
 === 辩论文字稿 ===
 ${transcript}
 === 文字稿结束 ===
 
-请严格按照你的身份设定和评分标准，完成五步评分，输出JSON。`;
+请严格按照你的身份设定和评分标准，对以上六位辩手逐一打分。
+
+将下方JSON骨架中的数字0和空字符串""替换为你的评分和点评，输出完整JSON。
+**不要修改辩手姓名、team、顺序。不要输出任何JSON以外的内容。**
+
+\`\`\`json
+{
+  "judge_comment": "",
+  "winner": "",
+  "players": [
+${playerSkeleton}
+  ],
+  "team_scores": {
+    "正方": {"total":0,"dimensions":{"论点逻辑性":0,"论据丰富度":0,"反驳精准度":0,"科幻素养":0,"表达清晰度":0}},
+    "反方": {"total":0,"dimensions":{"论点逻辑性":0,"论据丰富度":0,"反驳精准度":0,"科幻素养":0,"表达清晰度":0}}
+  }
+}
+\`\`\``;
 
   const url = config.apiUrl.replace(/\/+$/, '') + '/chat/completions';
   const resp = await fetch(url, {
@@ -615,6 +644,7 @@ ${transcript}
       model: config.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,
+      top_p: 1,
       seed: 42,
       max_tokens: 4096,
     }),
