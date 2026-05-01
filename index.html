@@ -732,6 +732,50 @@ ${playerSkeleton}
   return JSON.parse(jsonMatch[0]);
 }
 
+// ===== Stable scoring: run N times, majority winner + median scores =====
+const STABILITY_RUNS = 3;
+
+function majorityVote(results) {
+  const votes = {};
+  results.forEach(r => votes[r.winner] = (votes[r.winner] || 0) + 1);
+  return Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function medianRun(results) {
+  // Pick the run whose average player total is closest to the median of all runs
+  const avgTotals = results.map(r => {
+    const sum = r.players.reduce((s, p) => s + p.total, 0);
+    return sum / r.players.length;
+  });
+  const sorted = [...avgTotals].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  let bestIdx = 0, bestDist = Infinity;
+  avgTotals.forEach((t, i) => {
+    const dist = Math.abs(t - median);
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+async function callLLMStable(config, transcript, loadingEl, label) {
+  const results = [];
+  for (let i = 0; i < STABILITY_RUNS; i++) {
+    if (loadingEl) loadingEl.textContent = `${label}（第 ${i + 1}/${STABILITY_RUNS} 轮验证）`;
+    results.push(await callLLM(config, transcript));
+  }
+
+  // Majority vote for winner
+  const winner = majorityVote(results);
+  // Median run for scores
+  const bestIdx = medianRun(results);
+  const result = JSON.parse(JSON.stringify(results[bestIdx]));
+  result.winner = winner;
+
+  // Store agreement info
+  result._agreement = results.map(r => r.winner);
+  return result;
+}
+
 // ===== Start judging =====
 async function startJudging() {
   const config = getConfig();
@@ -749,20 +793,20 @@ async function startJudging() {
 
   try {
     if (config.multiJudge) {
-      // === Multi-judge mode: all 5 personas in parallel ===
+      // === Multi-judge: 5 personas, each runs 3x for stability ===
       const personaKeys = ['default', 'marvin', 'sophon', 'daneel', 'tars'];
       const loadingEl = document.getElementById('loadingText');
 
       const promises = personaKeys.map(async (key, idx) => {
         const cfg = { ...config, persona: key };
-        loadingEl.textContent = `正在评分中...（评委 ${idx + 1}/5 — ${PERSONAS[key].name}）`;
-        const result = await callLLM(cfg, transcript);
+        const label = `评委 ${idx + 1}/5 — ${PERSONAS[key].name}`;
+        const result = await callLLMStable(cfg, transcript, loadingEl, label);
         return { key, persona: PERSONAS[key], result };
       });
 
       const allResults = await Promise.all(promises);
 
-      // Majority vote
+      // Majority vote across all judges
       const votes = { '正方': 0, '反方': 0, '平局': 0 };
       allResults.forEach(r => { votes[r.result.winner]++; });
       const winner = votes['正方'] >= votes['反方'] && votes['正方'] >= votes['平局'] ? '正方'
@@ -770,10 +814,15 @@ async function startJudging() {
 
       hideLoading();
       renderMultiResults(config, allResults, winner, votes);
-      localStorage.setItem('lastResult', JSON.stringify({ config, allResults: allResults.map(r => ({ key: r.key, result: r.result })), multiJudge: true }));
+      localStorage.setItem('lastResult', JSON.stringify({
+        config, multiJudge: true,
+        allResults: allResults.map(r => ({ key: r.key, result: r.result })),
+      }));
     } else {
-      // === Single judge mode ===
-      const result = await callLLM(config, transcript);
+      // === Single judge: run 3x for stability ===
+      const loadingEl = document.getElementById('loadingText');
+      const personaName = PERSONAS[config.persona]?.name || '专业辩论评委';
+      const result = await callLLMStable(config, transcript, loadingEl, `评委 — ${personaName}`);
       hideLoading();
       renderResults(config, result);
       localStorage.setItem('lastResult', JSON.stringify({ config, result }));
