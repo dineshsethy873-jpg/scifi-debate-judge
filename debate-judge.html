@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 科幻辩论赛评委系统</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f0f1a;
+    --panel: #1a1a2e;
+    --border: #2a2a4a;
+    --text: #e0e0e0;
+    --dim: #8888aa;
+    --team-a: #00d4ff;
+    --team-b: #ff6b6b;
+    --gold: #ffd700;
+    --green: #4ade80;
+    --accent: #7c3aed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ===== Stars background ===== */
+  .stars {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0;
+  }
+  .star {
+    position: absolute; border-radius: 50%;
+    background: white;
+    animation: twinkle var(--dur) ease-in-out infinite;
+    animation-delay: var(--delay);
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  /* ===== Layout ===== */
+  .app {
+    position: relative; z-index: 1;
+    max-width: 1200px; margin: 0 auto; padding: 24px;
+  }
+
+  /* ===== Header ===== */
+  .header {
+    text-align: center; padding: 32px 0 24px;
+  }
+  .header h1 {
+    font-size: 2.4rem; font-weight: 900;
+    background: linear-gradient(135deg, var(--team-a), #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 4px;
+  }
+  .header .subtitle { color: var(--dim); margin-top: 8px; font-size: 0.95rem; letter-spacing: 2px; }
+
+  /* ===== Steps indicator ===== */
+  .steps {
+    display: flex; justify-content: center; gap: 12px; margin-bottom: 32px;
+  }
+  .step {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px; border-radius: 24px;
+    background: var(--panel); border: 1px solid var(--border);
+    color: var(--dim); font-size: 0.9rem;
+    transition: all 0.3s;
+  }
+  .step.active { border-color: var(--accent); color: white; }
+  .step.done { border-color: var(--green); color: var(--green); }
+  .step-num {
+    width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--border); font-size: 0.8rem; font-weight: 700;
+  }
+  .step.active .step-num { background: var(--accent); }
+  .step.done .step-num { background: var(--green); }
+
+  /* ===== Panels ===== */
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px; margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 1.3rem; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
+  }
+  .panel h2 .icon { font-size: 1.5rem; }
+
+  .section { display: none; }
+  .section.visible { display: block; }
+
+  /* ===== Form elements ===== */
+  .form-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+  }
+  .form-row.single { grid-template-columns: 1fr; }
+  .form-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group label {
+    font-size: 0.85rem; color: var(--dim); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  input, textarea, select {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px;
+    color: var(--text); font-size: 0.95rem; font-family: inherit;
+    transition: border-color 0.2s;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none; border-color: var(--accent);
+  }
+  textarea { resize: vertical; min-height: 200px; line-height: 1.6; }
+  textarea.large { min-height: 320px; font-size: 0.9rem; }
+
+  /* ===== Buttons ===== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 28px; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 700; cursor: pointer;
+    transition: all 0.2s; font-family: inherit;
+    letter-spacing: 1px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    color: white;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,58,237,0.4); }
+  .btn-secondary {
+    background: var(--border); color: var(--text);
+  }
+  .btn-secondary:hover { background: #3a3a5a; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-large { padding: 16px 48px; font-size: 1.2rem; border-radius: 14px; }
+
+  .btn-row { display: flex; gap: 12px; margin-top: 24px; justify-content: center; }
+
+  /* ===== Team config ===== */
+  .team-config {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  }
+  .team-box {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .team-box.team-a { border-left: 3px solid var(--team-a); }
+  .team-box.team-b { border-left: 3px solid var(--team-b); }
+  .team-box h3 { font-size: 1rem; margin-bottom: 14px; }
+  .team-a h3 { color: var(--team-a); }
+  .team-b h3 { color: var(--team-b); }
+  .player-inputs { display: flex; flex-direction: column; gap: 10px; }
+  .player-input {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel); border-radius: 8px; padding: 6px 10px;
+  }
+  .player-input .role { font-size: 0.78rem; color: var(--dim); min-width: 48px; }
+  .player-input input { flex: 1; padding: 8px 10px; }
+
+  /* ===== Results ===== */
+  .verdict-banner {
+    text-align: center; padding: 40px 20px;
+    border-radius: 16px; margin-bottom: 28px;
+    animation: fadeInUp 0.6s ease-out;
+  }
+  .verdict-banner.win-a { background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(0,212,255,0.05)); border: 2px solid var(--team-a); }
+  .verdict-banner.win-b { background: linear-gradient(135deg, rgba(255,107,107,0.15), rgba(255,107,107,0.05)); border: 2px solid var(--team-b); }
+  .verdict-banner.tie { background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.05)); border: 2px solid var(--gold); }
+  .verdict-icon { font-size: 4rem; margin-bottom: 12px; }
+  .verdict-text { font-size: 2rem; font-weight: 900; letter-spacing: 2px; }
+  .verdict-score { font-size: 1.1rem; color: var(--dim); margin-top: 8px; }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .charts-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
+  .chart-box {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+    text-align: center;
+  }
+  .chart-box h3 { margin-bottom: 12px; font-size: 1rem; }
+  .chart-box canvas { max-height: 320px; }
+
+  .score-cards {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 900px) { .score-cards { grid-template-columns: 1fr 1fr; } }
+  .score-card {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+    animation: fadeInUp 0.5s ease-out backwards;
+  }
+  .score-card:nth-child(1) { animation-delay: 0.1s; }
+  .score-card:nth-child(2) { animation-delay: 0.2s; }
+  .score-card:nth-child(3) { animation-delay: 0.3s; }
+  .score-card:nth-child(4) { animation-delay: 0.4s; }
+  .score-card:nth-child(5) { animation-delay: 0.5s; }
+  .score-card:nth-child(6) { animation-delay: 0.6s; }
+
+  .score-card.team-a-card { border-left: 3px solid var(--team-a); }
+  .score-card.team-b-card { border-left: 3px solid var(--team-b); }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .card-name { font-weight: 700; font-size: 1.05rem; }
+  .card-team-tag { font-size: 0.75rem; padding: 2px 10px; border-radius: 12px; }
+  .team-a-card .card-team-tag { background: rgba(0,212,255,0.2); color: var(--team-a); }
+  .team-b-card .card-team-tag { background: rgba(255,107,107,0.2); color: var(--team-b); }
+  .card-total {
+    font-size: 2rem; font-weight: 900;
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .card-dims { display: flex; flex-direction: column; gap: 6px; }
+  .dim-row { display: flex; justify-content: space-between; align-items: center; }
+  .dim-label { font-size: 0.82rem; color: var(--dim); }
+  .dim-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 3px; margin: 0 10px; overflow: hidden; }
+  .dim-bar { height: 100%; border-radius: 3px; transition: width 1s ease-out; }
+  .dim-bar.a { background: var(--team-a); }
+  .dim-bar.b { background: var(--team-b); }
+  .dim-score { font-size: 0.85rem; font-weight: 700; min-width: 24px; text-align: right; }
+  .card-comment {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+    font-size: 0.82rem; color: var(--dim); line-height: 1.5; font-style: italic;
+  }
+
+  /* ===== Loading ===== */
+  .loading-overlay {
+    display: none; position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%; background: rgba(15,15,26,0.9);
+    z-index: 100; justify-content: center; align-items: center; flex-direction: column;
+  }
+  .loading-overlay.active { display: flex; }
+  .loader-ring {
+    width: 60px; height: 60px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { margin-top: 20px; font-size: 1.1rem; color: var(--dim); letter-spacing: 2px; }
+  .loading-quote {
+    margin-top: 12px; font-size: 0.85rem; color: var(--dim);
+    font-style: italic; max-width: 400px; text-align: center;
+  }
+
+  /* ===== Toast ===== */
+  .toast {
+    position: fixed; top: 20px; right: 20px; z-index: 200;
+    padding: 14px 24px; border-radius: 10px; font-size: 0.9rem;
+    animation: slideIn 0.3s ease-out;
+    display: none;
+  }
+  .toast.error { background: #dc2626; color: white; display: block; }
+  .toast.success { background: #16a34a; color: white; display: block; }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(40px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 600px) {
+    .app { padding: 12px; }
+    .header h1 { font-size: 1.6rem; }
+    .form-row, .team-config { grid-template-columns: 1fr; }
+    .score-cards { grid-template-columns: 1fr; }
+    .charts-row { grid-template-columns: 1fr; }
+    .steps { gap: 4px; }
+    .step { padding: 6px 12px; font-size: 0.75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stars" id="stars"></div>
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loader-ring"></div>
+  <div class="loading-text">AI 评委正在分析辩论...</div>
+  <div class="loading-quote" id="loadingQuote"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="app">
+  <div class="header">
+    <h1>AI 科幻辩论赛评委系统</h1>
+    <div class="subtitle">SCI-FI DEBATE · AI JUDGE</div>
+  </div>
+
+  <div class="steps">
+    <div class="step active" id="step1"><span class="step-num">1</span> 赛事配置</div>
+    <div class="step" id="step2"><span class="step-num">2</span> 录入文字稿</div>
+    <div class="step" id="step3"><span class="step-num">3</span> AI 评分</div>
+    <div class="step" id="step4"><span class="step-num">4</span> 结果展示</div>
+  </div>
+
+  <!-- ========== SECTION 1: Config ========== -->
+  <div class="section visible" id="secConfig">
+    <div class="panel">
+      <h2><span class="icon">⚙️</span> 赛事配置</h2>
+
+      <div class="form-row single">
+        <div class="form-group">
+          <label>辩题</label>
+          <input type="text" id="topic" placeholder="例：强人工智能是否应该拥有自主权？">
+        </div>
+      </div>
+
+      <div class="team-config">
+        <div class="team-box team-a">
+          <h3>正方</h3>
+          <div class="form-group" style="margin-bottom:12px">
+            <label>队名</label>
+            <input type="text" id="teamAName" placeholder="例：三体舰队">
+          </div>
+          <div class="player-inputs">
+            <div class="player-input"><span class="role">一辩</span><input type="text" id="a1" placeholder="姓名"></div>
+            <div class="player-input"><span class="role">二辩</span><input type="text" id="a2" placeholder="姓名"></div>
+            <div class="player-input"><span class="role">三辩</span><input type="text" id="a3" placeholder="姓名"></div>
+          </div>
+        </div>
+        <div class="team-box team-b">
+          <h3>反方</h3>
+          <div class="form-group" style="margin-bottom:12px">
+            <label>队名</label>
+            <input type="text" id="teamBName" placeholder="例：水滴军团">
+          </div>
+          <div class="player-inputs">
+            <div class="player-input"><span class="role">一辩</span><input type="text" id="b1" placeholder="姓名"></div>
+            <div class="player-input"><span class="role">二辩</span><input type="text" id="b2" placeholder="姓名"></div>
+            <div class="player-input"><span class="role">三辩</span><input type="text" id="b3" placeholder="姓名"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2><span class="icon">🔑</span> LLM API 设置</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>API 地址（OpenAI 兼容）</label>
+          <input type="text" id="apiUrl" placeholder="https://api.deepseek.com/v1">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-...">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>模型名称</label>
+          <input type="text" id="modelName" placeholder="deepseek-chat">
+        </div>
+        <div class="form-group">
+          <label>AI 评委人设（可选）</label>
+          <select id="persona">
+            <option value="">默认 — 专业辩论评委</option>
+            <option value="marvin">《银河系漫游指南》Marvin — 丧系吐槽</option>
+            <option value="sophon">《三体》智子 — 冷静超然</option>
+            <option value="daneel">《基地》丹尼尔 — 逻辑至上</option>
+            <option value="tars">《星际穿越》TARS — 幽默务实</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveConfig()">保存配置 & 下一步 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== SECTION 2: Transcript ========== -->
+  <div class="section" id="secTranscript">
+    <div class="panel">
+      <h2><span class="icon">📝</span> 录入辩论文字稿</h2>
+      <p style="color:var(--dim);margin-bottom:16px;font-size:0.9rem">
+        将讯飞会议本导出的文字稿粘贴到下方。建议保留说话人标签（如"张三："），方便 AI 识别辩手身份。
+        <br>也支持直接粘贴纯文本，AI 会尝试自动分段。
+      </p>
+      <textarea class="large" id="transcript" placeholder="例：
+正方一辩 张三：我方认为强人工智能应当拥有自主权。理由有三：第一……
+
+反方一辩 李四：对方辩友的观点存在根本性谬误。首先……
+
+正方二辩 王五：回应对方关于……的质疑。在《机器人系列》中阿西莫夫提出了……
+
+……"></textarea>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goToSection('secConfig')">← 返回配置</button>
+        <button class="btn btn-primary btn-large" onclick="startJudging()">🤖 开始 AI 评分</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== SECTION 3: Results ========== -->
+  <div class="section" id="secResults">
+    <div id="resultsContent"></div>
+    <div class="btn-row" style="margin-top:32px">
+      <button class="btn btn-secondary" onclick="goToSection('secTranscript')">← 返回修改文字稿</button>
+      <button class="btn btn-primary" onclick="resetAll()">🔄 开始新一轮辩论</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== Starfield =====
+(function() {
+  const container = document.getElementById('stars');
+  for (let i = 0; i < 120; i++) {
+    const star = document.createElement('div');
+    star.className = 'star';
+    star.style.cssText = `
+      left: ${Math.random()*100}%; top: ${Math.random()*100}%;
+      width: ${Math.random()*2+1}px; height: ${Math.random()*2+1}px;
+      --dur: ${Math.random()*3+2}s;
+      --delay: ${Math.random()*3}s;
+    `;
+    container.appendChild(star);
+  }
+})();
+
+// ===== Data store =====
+const DEFAULT_API_URL = 'https://api.deepseek.com/v1';
+const DEFAULT_MODEL = 'deepseek-chat';
+
+function getConfig() {
+  return {
+    topic: document.getElementById('topic').value.trim(),
+    teamA: document.getElementById('teamAName').value.trim() || '正方',
+    teamB: document.getElementById('teamBName').value.trim() || '反方',
+    playersA: [
+      document.getElementById('a1').value.trim() || '正方一辩',
+      document.getElementById('a2').value.trim() || '正方二辩',
+      document.getElementById('a3').value.trim() || '正方三辩',
+    ],
+    playersB: [
+      document.getElementById('b1').value.trim() || '反方一辩',
+      document.getElementById('b2').value.trim() || '反方二辩',
+      document.getElementById('b3').value.trim() || '反方三辩',
+    ],
+    apiUrl: document.getElementById('apiUrl').value.trim() || DEFAULT_API_URL,
+    apiKey: document.getElementById('apiKey').value.trim(),
+    model: document.getElementById('modelName').value.trim() || DEFAULT_MODEL,
+    persona: document.getElementById('persona').value,
+  };
+}
+
+function restoreConfig() {
+  const c = JSON.parse(localStorage.getItem('debateConfig') || '{}');
+  if (c.apiUrl) document.getElementById('apiUrl').value = c.apiUrl;
+  if (c.apiKey) document.getElementById('apiKey').value = c.apiKey;
+  if (c.model) document.getElementById('modelName').value = c.model;
+  if (c.persona !== undefined) document.getElementById('persona').value = c.persona;
+  // Also restore debate info
+  if (c.topic) document.getElementById('topic').value = c.topic;
+  if (c.teamA) document.getElementById('teamAName').value = c.teamA;
+  if (c.teamB) document.getElementById('teamBName').value = c.teamB;
+  if (c.playersA) {
+    document.getElementById('a1').value = c.playersA[0] || '';
+    document.getElementById('a2').value = c.playersA[1] || '';
+    document.getElementById('a3').value = c.playersA[2] || '';
+  }
+  if (c.playersB) {
+    document.getElementById('b1').value = c.playersB[0] || '';
+    document.getElementById('b2').value = c.playersB[1] || '';
+    document.getElementById('b3').value = c.playersB[2] || '';
+  }
+}
+
+function saveConfig() {
+  const c = getConfig();
+  if (!c.apiKey) { showToast('请填写 API Key', 'error'); return; }
+  if (!c.topic) { showToast('请填写辩题', 'error'); return; }
+  localStorage.setItem('debateConfig', JSON.stringify(c));
+  goToSection('secTranscript');
+}
+
+restoreConfig();
+
+// ===== Navigation =====
+function goToSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('visible'));
+  document.getElementById(id).classList.add('visible');
+
+  const steps = { secConfig: 1, secTranscript: 2, secResults: 4 };
+  const idx = steps[id] || 1;
+  document.querySelectorAll('.step').forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i + 1 < idx) s.classList.add('done');
+    if (i + 1 === idx) s.classList.add('active');
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ===== Toast =====
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type;
+  setTimeout(() => { t.className = 'toast'; }, 3500);
+}
+
+// ===== Loading =====
+const sciFiQuotes = [
+  '"任何足够先进的技术，都与魔法无异。" — 亚瑟·克拉克',
+  '"暴力是最后的手段，而智慧才是第一选择。" — 《基地》',
+  '"我们探索宇宙，最终是为了了解自己。" — 卡尔·萨根',
+  '"可能性，是宇宙最危险的词语。" — 《三体》',
+  '"不要温和地走进那个良夜。" — 迪伦·托马斯',
+  '"答案总是42。" — 《银河系漫游指南》',
+  '"恐惧是思维的杀手。" — 《沙丘》',
+  '"未来已经到来，只是分布不均。" — 威廉·吉布森',
+];
+
+function showLoading() {
+  const q = sciFiQuotes[Math.floor(Math.random() * sciFiQuotes.length)];
+  document.getElementById('loadingQuote').textContent = q;
+  document.getElementById('loadingOverlay').classList.add('active');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('active');
+}
+
+// ===== AI Persona prompts =====
+const PERSONAS = {
+  marvin: '你是一个极度聪明但极度丧的AI评委，名叫Marvin，来自《银河系漫游指南》。你对人类的辩论感到厌倦，但你的评分异常精准。请在点评中加入带有讽刺和无奈风格的吐槽，但保持专业度。',
+  sophon: '你是来自《三体》的智子，一个冷静、超然的AI。你用近乎冷酷的理性分析一切，评分风格简洁、精准、不带感情，偶尔引用三体中的哲学概念。',
+  daneel: '你是来自《基地》系列的机器人丹尼尔·奥利瓦。你以第零法则为核心价值观，极度注重逻辑和人类整体利益。评分时你严谨、公正，喜欢分析论证链条的完整性。',
+  tars: '你是来自《星际穿越》的机器人TARS。你务实、幽默，说话直接。你的评分风格是直击要害，用最少的话指出最核心的问题，偶尔调整幽默度参数。',
+};
+
+function buildSystemPrompt(config) {
+  const personaPrompt = PERSONAS[config.persona] || '你是一个专业的科幻辩论赛AI评委。你精通辩论技巧和科幻知识，擅长从多维度客观评价辩手表现。';
+  return `${personaPrompt}
+
+## 你的任务
+对一场科幻主题辩论赛进行评分。你会收到完整的辩论文字稿，需要：
+1. 识别每位辩手的发言内容
+2. 从五个维度对每位辩手打分（1-10分，可保留1位小数）
+3. 给出综合点评
+4. 判定胜负
+
+## 评分维度及权重
+- **论点逻辑性** (权重30%): 论证链条是否完整清晰，是否使用了逻辑谬误，因果推理是否严谨
+- **论据丰富度** (权重20%): 引用的科幻作品、科学原理、现实案例是否贴切有力，知识面广度
+- **反驳精准度** (权重20%): 是否准确抓住对方论证的漏洞和核心矛盾，反驳是否有杀伤力
+- **科幻素养** (权重15%): 对科幻概念的理解深度、引用广度，是否展现了真正的科幻视野
+- **表达清晰度** (权重15%): 语言组织能力、表述是否易于理解、台风（通过文字判断）
+
+## 输出格式
+必须严格输出以下JSON格式（不要输出其他内容）：
+\`\`\`json
+{
+  "judge_comment": "整场辩论的综合点评，100-200字，包含对双方整体表现的评价",
+  "winner": "正方" | "反方" | "平局",
+  "players": [
+    {
+      "name": "辩手姓名",
+      "team": "正方" | "反方",
+      "total": 8.5,
+      "dimensions": {
+        "论点逻辑性": 8.0,
+        "论据丰富度": 8.5,
+        "反驳精准度": 7.5,
+        "科幻素养": 9.0,
+        "表达清晰度": 8.5
+      },
+      "comment": "对该辩手的简短点评，50-80字"
+    }
+  ],
+  "team_scores": {
+    "正方": { "total": 25.5, "dimensions": { "论点逻辑性": 8.0, "论据丰富度": 8.5, "反驳精准度": 7.0, "科幻素养": 9.0, "表达清晰度": 8.5 } },
+    "反方": { "total": 24.0, "dimensions": { "论点逻辑性": 7.5, "论据丰富度": 8.0, "反驳精准度": 7.5, "科幻素养": 8.0, "表达清晰度": 8.0 } }
+  }
+}
+\`\`\`
+
+注意：
+- team_scores中的dimensions是该队所有辩手各维度的平均分
+- 辩题：${config.topic}
+- 正方队伍：${config.teamA}，辩手：${config.playersA.join('、')}
+- 反方队伍：${config.teamB}，辩手：${config.playersB.join('、')}`;
+}
+
+// ===== API call =====
+async function callLLM(config, transcript) {
+  const systemPrompt = buildSystemPrompt(config);
+  const userPrompt = `以下是辩论赛的文字稿，请按照要求进行评分。
+
+辩题：${config.topic}
+正方（${config.teamA}）：${config.playersA.join('、')}
+反方（${config.teamB}）：${config.playersB.join('、')}
+
+=== 辩论文字稿 ===
+${transcript}
+=== 文字稿结束 ===
+
+请根据以上文字稿，对每位辩手进行五维度评分，输出要求的JSON格式。`;
+
+  const url = config.apiUrl.replace(/\/+$/, '') + '/chat/completions';
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`API 调用失败 (${resp.status}): ${err}`);
+  }
+
+  const data = await resp.json();
+  const content = data.choices[0].message.content;
+
+  // Extract JSON from response (handle possible markdown wrapping)
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AI 返回内容无法解析为JSON:\n' + content);
+
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ===== Start judging =====
+async function startJudging() {
+  const config = getConfig();
+  const transcript = document.getElementById('transcript').value.trim();
+
+  if (!transcript) { showToast('请粘贴辩论文字稿', 'error'); return; }
+  if (transcript.length < 50) { showToast('文字稿过短，请检查内容', 'error'); return; }
+
+  goToSection('secResults');
+  document.getElementById('resultsContent').innerHTML = '';
+  document.getElementById('step4').classList.add('active');
+  document.getElementById('step3').classList.add('active');
+
+  showLoading();
+
+  try {
+    const result = await callLLM(config, transcript);
+    hideLoading();
+    renderResults(config, result);
+    localStorage.setItem('lastResult', JSON.stringify({ config, result }));
+  } catch (err) {
+    hideLoading();
+    document.getElementById('resultsContent').innerHTML = `
+      <div class="panel" style="text-align:center;padding:48px">
+        <div style="font-size:3rem;margin-bottom:16px">⚠️</div>
+        <h2 style="color:#ff6b6b;margin-bottom:12px">评分出错</h2>
+        <p style="color:var(--dim);white-space:pre-wrap;font-size:0.9rem">${escapeHtml(err.message)}</p>
+        <p style="color:var(--dim);margin-top:16px;font-size:0.85rem">请检查 API 设置是否正确，或文字稿格式是否有问题。</p>
+      </div>`;
+  }
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// ===== Render results =====
+function renderResults(config, result) {
+  const dims = ['论点逻辑性', '论据丰富度', '反驳精准度', '科幻素养', '表达清晰度'];
+  const dimLabels = ['逻辑性', '丰富度', '反驳力', '科幻素养', '清晰度'];
+
+  const winnerClass = result.winner === '正方' ? 'win-a' : result.winner === '反方' ? 'win-b' : 'tie';
+  const winnerIcon = result.winner === '正方' ? '🏆' : result.winner === '反方' ? '🏆' : '🤝';
+  const winnerText = result.winner === '平局'
+    ? '势均力敌 · 平局！'
+    : `${result.winner} — ${result.winner === '正方' ? config.teamA : config.teamB} 获胜！`;
+
+  const aPlayers = result.players.filter(p => p.team === '正方');
+  const bPlayers = result.players.filter(p => p.team === '反方');
+
+  const html = `
+    <div class="verdict-banner ${winnerClass}">
+      <div class="verdict-icon">${winnerIcon}</div>
+      <div class="verdict-text">${winnerText}</div>
+      <div class="verdict-score">
+        正方 ${config.teamA}: ${result.team_scores.正方.total.toFixed(1)} 分 &nbsp;|&nbsp;
+        反方 ${config.teamB}: ${result.team_scores.反方.total.toFixed(1)} 分
+      </div>
+    </div>
+
+    <p style="color:var(--dim);margin-bottom:16px;font-style:italic;line-height:1.7;font-size:0.95rem">${escapeHtml(result.judge_comment)}</p>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <h3 style="color:var(--team-a)">${config.teamA} — 维度雷达</h3>
+        <canvas id="radarA"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3 style="color:var(--team-b)">${config.teamB} — 维度雷达</h3>
+        <canvas id="radarB"></canvas>
+      </div>
+    </div>
+
+    <h2 style="margin-bottom:16px;font-size:1.1rem">👤 辩手得分明细</h2>
+    <div class="score-cards">
+      ${[...aPlayers, ...bPlayers].map(p => {
+        const tc = p.team === '正方' ? 'team-a-card' : 'team-b-card';
+        const bc = p.team === '正方' ? 'a' : 'b';
+        const tag = p.team === '正方' ? config.teamA : config.teamB;
+        return `
+          <div class="score-card ${tc}">
+            <div class="card-header">
+              <div>
+                <div class="card-name">${escapeHtml(p.name)}</div>
+                <span class="card-team-tag">${escapeHtml(tag)}</span>
+              </div>
+              <div class="card-total">${p.total.toFixed(1)}</div>
+            </div>
+            <div class="card-dims">
+              ${dims.map((d, i) => `
+                <div class="dim-row">
+                  <span class="dim-label">${dimLabels[i]}</span>
+                  <div class="dim-bar-wrap"><div class="dim-bar ${bc}" style="width:${(p.dimensions[d]||0)*10}%"></div></div>
+                  <span class="dim-score">${(p.dimensions[d]||0).toFixed(1)}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="card-comment">"${escapeHtml(p.comment || '')}"</div>
+          </div>`;
+      }).join('')}
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <h3>⚔️ 两队维度对比</h3>
+        <canvas id="compareChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>📊 队伍总分</h3>
+        <canvas id="totalChart"></canvas>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('resultsContent').innerHTML = html;
+
+  // Draw charts (after DOM update)
+  setTimeout(() => {
+    const chartDefaults = {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { labels: { color: '#8888aa' } },
+      },
+      scales: {
+        r: {
+          beginAtZero: true,
+          max: 10,
+          min: 0,
+          ticks: { stepSize: 2, color: '#8888aa', backdropColor: 'transparent' },
+          grid: { color: '#2a2a4a' },
+          pointLabels: { color: '#e0e0e0', font: { size: 12 } },
+        },
+      },
+    };
+
+    // Radar A
+    new Chart(document.getElementById('radarA'), {
+      type: 'radar',
+      data: {
+        labels: dimLabels,
+        datasets: aPlayers.map((p, i) => ({
+          label: p.name,
+          data: dims.map(d => p.dimensions[d] || 0),
+          borderColor: ['rgba(0,212,255,1)', 'rgba(100,200,255,1)', 'rgba(150,180,255,1)'][i],
+          backgroundColor: ['rgba(0,212,255,0.1)', 'rgba(100,200,255,0.1)', 'rgba(150,180,255,0.1)'][i],
+          borderWidth: 2,
+        })),
+      },
+      options: chartDefaults,
+    });
+
+    // Radar B
+    new Chart(document.getElementById('radarB'), {
+      type: 'radar',
+      data: {
+        labels: dimLabels,
+        datasets: bPlayers.map((p, i) => ({
+          label: p.name,
+          data: dims.map(d => p.dimensions[d] || 0),
+          borderColor: ['rgba(255,107,107,1)', 'rgba(255,150,107,1)', 'rgba(255,180,107,1)'][i],
+          backgroundColor: ['rgba(255,107,107,0.1)', 'rgba(255,150,107,0.1)', 'rgba(255,180,107,0.1)'][i],
+          borderWidth: 2,
+        })),
+      },
+      options: chartDefaults,
+    });
+
+    // Comparison radar
+    new Chart(document.getElementById('compareChart'), {
+      type: 'radar',
+      data: {
+        labels: dimLabels,
+        datasets: [
+          {
+            label: config.teamA,
+            data: dims.map(d => result.team_scores.正方.dimensions[d] || 0),
+            borderColor: 'rgba(0,212,255,1)',
+            backgroundColor: 'rgba(0,212,255,0.15)',
+            borderWidth: 3,
+            pointRadius: 5,
+            pointBackgroundColor: 'rgba(0,212,255,1)',
+          },
+          {
+            label: config.teamB,
+            data: dims.map(d => result.team_scores.反方.dimensions[d] || 0),
+            borderColor: 'rgba(255,107,107,1)',
+            backgroundColor: 'rgba(255,107,107,0.15)',
+            borderWidth: 3,
+            pointRadius: 5,
+            pointBackgroundColor: 'rgba(255,107,107,1)',
+          },
+        ],
+      },
+      options: chartDefaults,
+    });
+
+    // Total bar chart
+    new Chart(document.getElementById('totalChart'), {
+      type: 'bar',
+      data: {
+        labels: [config.teamA, config.teamB],
+        datasets: [{
+          label: '队伍总分',
+          data: [result.team_scores.正方.total, result.team_scores.反方.total],
+          backgroundColor: ['rgba(0,212,255,0.7)', 'rgba(255,107,107,0.7)'],
+          borderColor: ['rgba(0,212,255,1)', 'rgba(255,107,107,1)'],
+          borderWidth: 2,
+          borderRadius: 8,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          y: {
+            beginAtZero: false,
+            min: Math.floor(Math.min(result.team_scores.正方.total, result.team_scores.反方.total) - 2),
+            ticks: { color: '#8888aa' },
+            grid: { color: '#2a2a4a' },
+          },
+          x: {
+            ticks: { color: '#e0e0e0', font: { size: 14, weight: 'bold' } },
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  }, 200);
+}
+
+// ===== Reset =====
+function resetAll() {
+  localStorage.removeItem('debateConfig');
+  localStorage.removeItem('lastResult');
+  document.getElementById('transcript').value = '';
+  document.getElementById('resultsContent').innerHTML = '';
+  document.querySelectorAll('.step').forEach(s => { s.classList.remove('active', 'done'); });
+  document.getElementById('step1').classList.add('active');
+  goToSection('secConfig');
+}
+
+// ===== Restore last result on load =====
+(function() {
+  const last = localStorage.getItem('lastResult');
+  if (last) {
+    try {
+      const { config, result } = JSON.parse(last);
+      restoreConfig();
+      // Don't auto-show results, just restore config state
+    } catch(e) {}
+  }
+})();
+</script>
+</body>
+</html>
