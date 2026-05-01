@@ -285,7 +285,7 @@
 <div class="stars" id="stars"></div>
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loader-ring"></div>
-  <div class="loading-text">AI 评委正在分析辩论...</div>
+  <div class="loading-text" id="loadingText">AI 评委正在分析辩论...</div>
   <div class="loading-quote" id="loadingQuote"></div>
 </div>
 <div class="toast" id="toast"></div>
@@ -537,74 +537,66 @@ const PERSONAS = {
   tars: '点评时以TARS（《星际穿越》）的口吻写作：直击要害，务实幽默，用短句点出核心问题，可适度调整幽默度使点评有趣但不轻浮。',
 };
 
-function buildSystemPrompt(config) {
-  const personaPrompt = PERSONAS[config.persona] || '你是一个专业的科幻辩论赛AI评委。';
-  return `## 核心原则（最高优先级）
-你的评分必须完全基于下方的五维度评分标准。评分标准是唯一依据，人设风格仅影响"点评的文风"，不得影响分数高低。同一份辩论稿在任何风格下打分必须一致。
+// ===== Shared rubric (used by both passes) =====
+const SCORING_RUBRIC = `## 评分维度及权重（严格按此打分，不可偏离）
+- 论点逻辑性 (权重30%): 论证链条是否完整清晰，使用逻辑谬误的数量和严重程度，因果推理是否严谨
+- 论据丰富度 (权重20%): 引用的科幻作品、科学原理、现实案例是否贴切有力、准确，知识面的广度和深度
+- 反驳精准度 (权重20%): 是否准确抓住对方论证的核心漏洞和矛盾，反驳是否直接命中靶心
+- 科幻素养 (权重15%): 对科幻概念的理解深度和引用广度，是否能旁征博引不同作品，理解是否到位
+- 表达清晰度 (权重15%): 语言组织能力，表述是否易于理解，逻辑层次是否分明
 
-## 评分维度及权重（严格按此打分，不可偏离）
-- **论点逻辑性** (权重30%): 论证链条是否完整清晰，使用逻辑谬误的数量和严重程度，因果推理是否严谨
-- **论据丰富度** (权重20%): 引用的科幻作品、科学原理、现实案例是否贴切有力、准确，知识面的广度和深度
-- **反驳精准度** (权重20%): 是否准确抓住对方论证的核心漏洞和矛盾，反驳是否直接命中靶心
-- **科幻素养** (权重15%): 对科幻概念的理解深度和引用广度，是否能旁征博引不同作品，理解是否到位
-- **表达清晰度** (权重15%): 语言组织能力，表述是否易于理解，逻辑层次是否分明
-
-### 打分锚定参考（防止分数膨胀/紧缩）
-- 10分：罕见，近乎完美的表现，可载入教科书
+## 打分锚定参考
+- 10分：罕见，近乎完美，可载入教科书
 - 8-9分：优秀，逻辑严密、论据充分、反驳有力
 - 6-7分：合格，无明显硬伤但也不出彩
 - 4-5分：有显著漏洞或论据薄弱
 - 1-3分：严重偏离辩题或逻辑混乱
 
 ## 评分步骤（逐步执行，不可跳过）
-步骤1 — 识别辩手：从文字稿中提取每位辩手的发言，归入对应队伍
-步骤2 — 逐人逐维度评分：对每位辩手，在五个维度上分别给出1-10分，依据打分锚定参考
-步骤3 — 计算队伍总分：各队辩手总分加和，各维度取队内平均
-步骤4 — 判定胜负：对比两队总分，高者获胜；总分差<0.3视为平局
-步骤5 — 撰写点评：先写分数结论，再写文字点评
+1. 识别辩手：从文字稿中提取每位辩手的发言，归入对应队伍
+2. 逐人逐维度评分：对每位辩手，在五个维度上分别给出1-10分，依据打分锚定参考
+3. 计算队伍总分：各队辩手总分加和，各维度取队内平均
+4. 判定胜负：对比两队总分，高者获胜；总分差<0.3视为平局
 
-## 输出格式
-必须严格输出以下JSON格式，不要输出任何其他内容：
-\`\`\`json
-{
-  "judge_comment": "整场辩论的综合点评，100-200字",
-  "winner": "正方" | "反方" | "平局",
-  "players": [
-    {
-      "name": "辩手姓名",
-      "team": "正方" | "反方",
-      "total": 8.5,
-      "dimensions": {
-        "论点逻辑性": 8.0,
-        "论据丰富度": 8.5,
-        "反驳精准度": 7.5,
-        "科幻素养": 9.0,
-        "表达清晰度": 8.5
-      },
-      "comment": "对该辩手的简短点评，50-80字"
-    }
-  ],
-  "team_scores": {
-    "正方": { "total": 25.5, "dimensions": { "论点逻辑性": 8.0, "论据丰富度": 8.5, "反驳精准度": 7.0, "科幻素养": 9.0, "表达清晰度": 8.5 } },
-    "反方": { "total": 24.0, "dimensions": { "论点逻辑性": 7.5, "论据丰富度": 8.0, "反驳精准度": 7.5, "科幻素养": 8.0, "表达清晰度": 8.0 } }
+## 输出JSON格式
+{"judge_comment":"综合点评100-200字","winner":"正方|反方|平局","players":[{"name":"姓名","team":"正方|反方","total":8.5,"dimensions":{"论点逻辑性":8.0,"论据丰富度":8.5,"反驳精准度":7.5,"科幻素养":9.0,"表达清晰度":8.5},"comment":"50-80字点评"}],"team_scores":{"正方":{"total":25.5,"dimensions":{"论点逻辑性":8.0,"论据丰富度":8.5,"反驳精准度":7.0,"科幻素养":9.0,"表达清晰度":8.5}},"反方":{"total":24.0,"dimensions":{"论点逻辑性":7.5,"论据丰富度":8.0,"反驳精准度":7.5,"科幻素养":8.0,"表达清晰度":8.0}}}}`;
+
+// ===== API call helper =====
+async function callAPI(config, prompt, temp = 0) {
+  const url = config.apiUrl.replace(/\/+$/, '') + '/chat/completions';
+  const body = {
+    model: config.model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: temp,
+    seed: 42,
+    max_tokens: 4096,
+  };
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`API 调用失败 (${resp.status}): ${err}`);
   }
-}
-\`\`\`
-
-## 点评风格（仅影响judge_comment和player.comment的文字风格，不影响分数）
-${personaPrompt}
-
-## 赛事信息
-- 辩题：${config.topic}
-- 正方队伍：${config.teamA}，辩手：${config.playersA.join('、')}
-- 反方队伍：${config.teamB}，辩手：${config.playersB.join('、')}`;
+  const data = await resp.json();
+  const content = data.choices[0].message.content;
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AI 返回内容无法解析为JSON:\n' + content);
+  return JSON.parse(jsonMatch[0]);
 }
 
-// ===== API call =====
-async function callLLM(config, transcript) {
-  const systemPrompt = buildSystemPrompt(config);
-  const userPrompt = `以下是辩论赛的文字稿，请按照要求进行评分。
+// ===== Pass 1: Pure scoring (no persona, no system prompt for max determinism) =====
+async function scoreDebate(config, transcript) {
+  const prompt = `你是辩论赛计分器。严格按以下标准对文字稿打分，只输出JSON，不输出其他内容。
 
+${SCORING_RUBRIC}
+
+=== 赛事信息 ===
 辩题：${config.topic}
 正方（${config.teamA}）：${config.playersA.join('、')}
 反方（${config.teamB}）：${config.playersB.join('、')}
@@ -613,41 +605,53 @@ async function callLLM(config, transcript) {
 ${transcript}
 === 文字稿结束 ===
 
-请根据以上文字稿，对每位辩手进行五维度评分，输出要求的JSON格式。`;
+请按步骤评分，输出JSON。`;
 
-  const url = config.apiUrl.replace(/\/+$/, '') + '/chat/completions';
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0,
-      seed: 42,
-      max_tokens: 4096,
-      response_format: { type: "json_object" },
-    }),
+  return await callAPI(config, prompt, 0);
+}
+
+// ===== Pass 2: Commentary rewrite (with persona, scores are locked) =====
+async function rewriteCommentary(config, transcript, scores, personaKey) {
+  if (!personaKey || !PERSONAS[personaKey]) return scores; // no persona = skip pass 2
+
+  const scoresJSON = JSON.stringify(scores, null, 2);
+  const prompt = `你的任务：把一篇辩论赛的评分点评，改写为特定角色的口吻。
+**重要：下面JSON中的所有数字字段（分数、total、dimensions、winner）已经锁定，你绝对不能修改任何一个数字，只能改写里面的文字字段（judge_comment 和 每位辩手的 comment）。**
+
+=== 改写风格 ===
+${PERSONAS[personaKey]}
+
+=== 已锁定的评分结果（数字不可改） ===
+${scoresJSON}
+
+=== 原始辩论稿（供你理解上下文） ===
+辩题：${config.topic}
+正方（${config.teamA}）：${config.playersA.join('、')}
+反方（${config.teamB}）：${config.playersB.join('、')}
+---
+${transcript}
+
+=== 指令 ===
+1. 改写 judge_comment 为上述改写风格的文字，长度100-200字
+2. 改写每位辩手的 comment 字段为上述改写风格的文字，长度50-80字
+3. 保持所有数字、winner字段、JSON结构完全不变
+4. 只输出改写后的完整JSON，不输出其他内容`;
+
+  const rewritten = await callAPI(config, prompt, 0.3);
+  // Safety: always use original scores, only adopt rewritten text fields
+  rewritten.winner = scores.winner;
+  rewritten.team_scores = scores.team_scores;
+  rewritten.players = rewritten.players.map((p, i) => {
+    const orig = scores.players[i] || p;
+    return {
+      ...p,
+      total: orig.total,
+      dimensions: orig.dimensions,
+      team: orig.team,
+      name: orig.name,
+    };
   });
-
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`API 调用失败 (${resp.status}): ${err}`);
-  }
-
-  const data = await resp.json();
-  const content = data.choices[0].message.content;
-
-  // Extract JSON from response (handle possible markdown wrapping)
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('AI 返回内容无法解析为JSON:\n' + content);
-
-  return JSON.parse(jsonMatch[0]);
+  return rewritten;
 }
 
 // ===== Start judging =====
@@ -666,7 +670,12 @@ async function startJudging() {
   showLoading();
 
   try {
-    const result = await callLLM(config, transcript);
+    // Pass 1: pure scoring (deterministic, no persona)
+    document.getElementById('loadingText').textContent = '正在评分中...（1/2）';
+    const scores = await scoreDebate(config, transcript);
+    // Pass 2: rewrite commentary with persona (if selected), scores locked
+    document.getElementById('loadingText').textContent = '正在润色点评...（2/2）';
+    const result = await rewriteCommentary(config, transcript, scores, config.persona);
     hideLoading();
     renderResults(config, result);
     localStorage.setItem('lastResult', JSON.stringify({ config, result }));
